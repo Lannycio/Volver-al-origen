@@ -1,0 +1,189 @@
+'use strict';
+(() => {
+const $ = (q,el=document)=>el.querySelector(q), $$=(q,el=document)=>[...el.querySelectorAll(q)];
+const clamp=(v,a=0,b=1)=>Math.min(b,Math.max(a,v)), mix=(a,b,t)=>a+(b-a)*t, ease=t=>t*t*(3-2*t);
+const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl=s=>{try{const u=new URL(s);return ['https:','http:'].includes(u.protocol)?u.href:'#'}catch{return '#'}};
+const md=s=>escape(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+?)\*/g,'<em>$1</em>').replace(/https?:\/\/[^\s<]+/g,u=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+const paragraph=p=>`<p data-paragraph="${escape(p.id)}">${md(p.text)}</p>`;
+let motionOverride=null;
+const motionOff=()=>paused||(media.matches&&motionOverride!==false);
+let content,scenes=[],selected=new Set(),geometry=[],active=0,paused=false,force=true,readerFocus=null;
+const media=matchMedia('(prefers-reduced-motion: reduce)');
+const world=$('#world'),ctx=world.getContext('2d',{alpha:false});
+let W=innerWidth,H=innerHeight,DPR=Math.min(devicePixelRatio||1,2),mobile=W<=600;
+let dispersed=false;
+const cover=new window.OriginCover();
+let art=null,pointer={x:-10000,y:-10000},impulse=0,lastFrame=0,scroll=0,raf=0;
+function heading(s){return `<div class="scene-heading"><span class="num">${s.id}</span>${escape(s.label)}</div>`}
+function beats(s,options={}){
+ const ps=s.paragraphs;let groups=[];
+ // Long paragraphs receive their own reading space; every supplied paragraph appears once.
+ for(let i=0;i<ps.length;){const group=[ps[i++]];if(i<ps.length&&group[0].text.length<400&&ps[i].text.length<400)group.push(ps[i++]);groups.push(group)}
+ return groups.map((g,i)=>`<div class="beat">${i===0?`${heading(s)}${options.title!==false?`<h2>${escape(s.title)}</h2>`:''}${options.before||''}`:''}${g.map(paragraph).join('')}${i===groups.length-1?options.after||'':''}</div>`).join('');
+}
+function render(){
+ const c=content,s=c.scenes;
+ document.title=c.meta.title;$('.wordmark span:last-child').textContent=c.meta.title;$('#course').textContent=c.meta.course;
+ $('meta[name=description]').content=c.meta.description;
+ $('[data-action=essay]').textContent=c.ui.readEssay;$('[data-action=sources]').textContent=c.ui.sources;
+ const journey=$('#journey');
+ journey.innerHTML=`<h1 class="sr-only">${escape(c.meta.title)}</h1><div id="reading-start" tabindex="-1"></div>
+ <section id="s01" class="scene scene-origin" aria-label="01 ${escape(s[0].label)}"><div class="cover-eyebrow"><span>${escape(c.meta.course)} / ${escape(c.ui.interactiveEssay)}</span><span>01 — ${escape(s[0].label)}</span></div><button id="cover-cube" class="cover-cube" aria-label="${escape(c.ui.coverExpand)}" aria-pressed="false" aria-describedby="cover-status"></button><div class="origin-question"><h3>${escape(s[0].title)}</h3></div><button id="cover-toggle" class="cover-toggle" aria-pressed="false"><span>${escape(c.ui.coverExpand)}</span><i aria-hidden="true">↗</i></button><p class="cover-instruction">${escape(c.ui.coverInputHint)}</p><p id="cover-status" class="sr-only" aria-live="polite"></p><a href="#s02" class="start-hint"><span>${escape(c.ui.begin)}</span><span class="hint-line"></span><span class="hint-circle"></span></a></section>
+ <section id="s02" class="scene scene-construction" aria-label="02 ${escape(s[1].label)}"><h2 class="sr-only">${escape(s[1].title)}</h2><div class="title-caption">02 / ${escape(s[1].label)}<span>${escape(c.meta.subtitle)}</span></div></section>
+ <section id="s03" class="scene scene-creativity" aria-label="03 ${escape(s[2].label)}">${beats(s[2],{after:`<button class="text-link disperse" id="disperse" aria-pressed="false">${escape(c.ui.disperse)}<span aria-hidden="true">↗</span></button>`})}</section>
+ <section id="s04" class="scene scene-search" aria-label="04 ${escape(s[3].label)}">${beats(s[3])}</section>
+ <section id="s05" class="scene scene-paper" aria-label="05 ${escape(s[4].label)}"><div class="experiment" aria-labelledby="experiment-title">${heading(s[4])}<h2 id="experiment-title">${escape(s[4].title)}</h2><div class="paper-byline">${escape(c.ui.divergentCreativity)} · ${escape(c.paper.author)}</div><span class="ribbon">${escape(c.ui.experiment)}</span><p class="instruction">${escape(c.paper.instruction)}</p><div class="word-board" role="group" aria-label="${escape(c.ui.wordGroup)}">${c.paper.words.map((w,i)=>`<button class="word" style="grid-row:${Math.floor(i/2)+1};--r:${i%2?-1:1}deg" aria-pressed="false" data-word="${escape(w)}">${escape(w)}</button>`).join('')}<button class="associate" id="associate" disabled><small><span id="word-count">0 / 3</span> ${escape(c.ui.wordsLabel)}</small>${escape(c.ui.associate)}</button></div><p class="concept-note">${escape(c.paper.demonstration)}</p><div class="selection-status" aria-live="polite" id="selection-status">${escape(c.ui.chooseMore)}</div><div class="experiment-actions"><button id="skip-experiment">${escape(c.ui.skipExperiment)}</button><button id="reset-experiment">${escape(c.ui.reset)}</button></div></div>
+ <div class="evidence" id="paper-evidence"><div class="beat">${heading(s[4])}<div class="author-label">${escape(c.ui.research)}</div><div class="evidence-numbers"><div><strong>${escape(c.paper.score)}</strong><p>${escape(c.paper.scoreLabel)}</p></div><div><strong>${escape(c.paper.percent)}</strong><p>${escape(c.paper.percentLabel)}</p></div></div><a class="citation" href="${safeUrl(c.paper.url)}" target="_blank" rel="noopener noreferrer">${escape(c.paper.author)} · ${escape(c.paper.citation)} ↗</a><div class="research-note"><p>${escape(c.paper.method)}</p><p>${escape(c.paper.limits)}</p><p class="scope">${escape(c.paper.scope)}</p></div></div>${beats(s[4],{before:`<div class="author-label">${escape(c.ui.interpretation)}</div>`})}</div></section>
+ <section id="s06" class="scene scene-zima" aria-label="06 ${escape(s[5].label)}">${beats(s[5],{after:`<a class="text-link netflix" href="${safeUrl(c.links.netflixUrl)}" target="_blank" rel="noopener noreferrer">${escape(c.links.netflixLabel)}</a>`})}</section>
+ <section id="s07" class="scene scene-identity" aria-label="07 ${escape(s[6].label)}">${beats(s[6])}</section>
+ <section id="s08" class="scene scene-reconstruction" aria-label="08 ${escape(s[7].label)}">${beats(s[7])}</section>
+ <section id="s09" class="scene scene-return" aria-label="09 ${escape(s[8].label)}">${beats(s[8],{title:false})}</section>
+ <section id="s10" class="scene scene-close" aria-label="10 ${escape(s[9].label)}"><div class="closing-copy">${s[9].paragraphs.slice(0,-1).map(paragraph).join('')}<h2 data-paragraph="${escape(s[9].paragraphs.at(-1)?.id||'closing-question')}">${escape(s[9].title)}</h2></div><div class="closing-links"><button data-action="sources">${escape(c.ui.sources)}</button><a href="#s01">${escape(c.ui.backToStart)}</a></div><span class="ending-label">${escape(c.meta.title)}</span></section>`;
+ scenes=$$('.scene');
+ cover.bind($('#s01'),c.ui);
+ $('#scene-menu').innerHTML=s.map(sc=>`<a href="#s${sc.id}" data-scene="${sc.id}"><span>${sc.id}</span>${escape(sc.label)}</a>`).join('');
+ $$('[data-action=essay]').forEach(b=>b.onclick=()=>openReader('essay'));
+ $$('[data-action=sources]').forEach(b=>b.onclick=()=>openReader('sources'));
+ $$('.word').forEach(b=>b.onclick=()=>toggleWord(b.dataset.word));
+ $('#reset-experiment').onclick=()=>{selected.clear();updateWords()};
+ $('#associate').onclick=()=>{if(selected.size===3){$('#selection-status').textContent=c.ui.selectionComplete;impulse=1;scrollToElement($('#paper-evidence'))}};
+ $('#skip-experiment').onclick=()=>scrollToElement($('#paper-evidence'));
+ $('#disperse').onclick=()=>{dispersed=!dispersed;$('#disperse').setAttribute('aria-pressed',String(dispersed));$('#disperse').firstChild.textContent=dispersed?content.ui.gather:content.ui.disperse;impulse=1;force=true};
+ $$('a[href^="#s"]').forEach(a=>a.onclick=e=>{const id=a.getAttribute('href').slice(2);if(!/^\d\d$/.test(id))return;e.preventDefault();setMenu(false);history.replaceState(null,'','#s'+id);if(a.classList.contains('start-hint')){const destination=$('#s02');destination.tabIndex=-1;destination.focus({preventScroll:true});destination.scrollIntoView({behavior:motionOff()?'instant':'smooth',block:'start'})}else goScene(id)});
+ selected.clear();dispersed=false;updateWords();measure();
+ if(art)art.resize();updateMotionLabel();force=true;
+}
+function toggleWord(w){if(selected.has(w))selected.delete(w);else if(selected.size<3)selected.add(w);else{$('#selection-status').textContent=content.ui.selectionFull;return}updateWords();impulse=.6;force=true}
+function updateWords(){
+ $$('.word').forEach(b=>b.setAttribute('aria-pressed',String(selected.has(b.dataset.word))));
+ $('#associate').disabled=selected.size!==3;$('#word-count').textContent=`${selected.size} / 3`;
+ $('#selection-status').textContent=selected.size===3?[...selected].join(' · '):`${selected.size} / 3 ${content.ui.selected}`;
+}
+function scrollToElement(el){el.scrollIntoView({behavior:motionOff()?'instant':'smooth',block:'start'})}
+function goScene(id){const i=content.scenes.findIndex(s=>s.id===id);if(i<0||!geometry[i])return;const offset=i===1?H*.60:i>1&&i<9?H*.16:0;window.scrollTo({top:geometry[i].top+offset,behavior:motionOff()?'instant':'smooth'})}
+function setMenu(v){$('.index-trigger').setAttribute('aria-expanded',String(v));$('#scene-menu').hidden=!v}
+$('.index-trigger').onclick=()=>setMenu($('#scene-menu').hidden);
+document.addEventListener('click',e=>{if(!e.target.closest('.journey-index'))setMenu(false)});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){setMenu(false)}if(e.altKey&&!e.ctrlKey&&!e.metaKey&&['ArrowDown','ArrowUp'].includes(e.key)&&!$('#reader').open){e.preventDefault();scrollToElement(scenes[clamp(active+(e.key==='ArrowDown'?1:-1),0,9)])}});
+function openReader(mode){
+ const c=content,all=new Map(c.scenes.flatMap(s=>s.paragraphs).map(p=>[p.id,p]));
+ readerFocus=document.activeElement;
+ $('#reader-title').textContent=mode==='essay'?c.ui.fullReading:c.ui.sourceHeading;
+ const refs=`<h2>${escape(c.ui.referencesHeading)}</h2>${c.essay.references.map(p=>`<p class="credits">${md(p)}</p>`).join('')}<p class="note">${md(c.essay.academicNote)}</p><p class="note">${md(c.essay.authorshipNote)}</p>`;
+ $('#reader-content').innerHTML=mode==='essay'?`<h1>${escape(c.meta.title)}</h1><div class="reader-intro">${escape(c.meta.subtitle)}<br><br>${escape(c.essay.intro.split('\n').find(l=>l.startsWith('## '))?.slice(3)||'Ensayo maestro')}<br><br>${md(c.essay.intro.split('\n\n').slice(1).join('\n\n'))}</div>${c.essay.sections.map(s=>`<h2>${escape(s.title)}</h2>${s.paragraphIds.map(id=>all.has(id)?paragraph(all.get(id)):'').join('')}`).join('')}${refs}`:`<h1>${escape(c.ui.sourceHeading)}</h1>${refs}<h2>${escape(c.ui.creditsHeading)}</h2><p class="credits">${md(c.essay.technicalCredits)}</p>`;
+ $('#reader').showModal();$('#reader').scrollTop=0;document.body.style.overflow='hidden';$('.dialog-close').focus();
+}
+function closeReader(){$('#reader').close();document.body.style.overflow='';readerFocus?.focus()}
+$('.dialog-close').onclick=closeReader;
+$('#reader').addEventListener('cancel',e=>{e.preventDefault();closeReader()});
+$('#reader').onclick=e=>{if(e.target===$('#reader')&&e.clientX<$('#reader').getBoundingClientRect().left)closeReader()};
+function updateMotionLabel(){const off=motionOff();$('#motion-toggle').setAttribute('aria-pressed',String(off));$('#motion-toggle').setAttribute('aria-label',off?content.ui.resumeMotion:content.ui.motion);$('#motion-toggle span').textContent=off?'▷':'Ⅱ';document.body.classList.toggle('motion-paused',off);document.documentElement.style.scrollBehavior=off?'auto':''}
+$('#motion-toggle').onclick=()=>{const wasOff=motionOff();paused=!wasOff;motionOverride=wasOff?false:null;updateMotionLabel();force=true};
+media.addEventListener('change',()=>{motionOverride=null;updateMotionLabel();force=true});
+function measure(){geometry=scenes.map(el=>({top:el.getBoundingClientRect().top+scrollY,height:el.offsetHeight}));force=true}
+addEventListener('scroll',()=>{scroll=scrollY;force=true},{passive:true});
+addEventListener('resize',()=>{W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,2);mobile=W<=600;art?.resize();measure()});
+addEventListener('pointermove',e=>{pointer.x=e.clientX;pointer.y=e.clientY;force=true},{passive:true});
+addEventListener('pointerdown',e=>{if(!e.target.closest('a,button,input,textarea,dialog')&&active>=1&&active<=3){pointer.x=e.clientX;pointer.y=e.clientY;impulse=.7;force=true}},{passive:true});
+addEventListener('pointerleave',()=>{pointer.x=-10000;pointer.y=-10000});
+function visualProgress(){
+ let i=0;for(let n=1;n<geometry.length;n++){if(scroll+H*.45>=geometry[n].top)i=n;else break}
+ if(i===0)return 0;
+ return i-1+ease(clamp((scroll-(geometry[i].top-H*.45))/(H*(i===9?.30:.60))));
+}
+function tick(t){raf=requestAnimationFrame(tick);if(document.hidden)return;if(t-lastFrame<32)return;const moving=!motionOff();if(!force&&!moving&&!cover.dirty)return;lastFrame=t;scroll=scrollY;
+ const i=geometry.reduce((a,g,n)=>scroll+H*.5>=g.top?n:a,0);if(i!==active){active=i;$('#scene-number').textContent=content.scenes[i].id;$('#scene-label').textContent=content.scenes[i].label;$$('#scene-menu a').forEach((a,n)=>a.setAttribute('aria-current',String(n===i)))}
+ $('.scroll-progress i').style.transform=`scaleX(${clamp(scroll/Math.max(1,document.documentElement.scrollHeight-H))})`;
+ const v=visualProgress();document.body.classList.toggle('is-cover',scroll<H*.60);art?.draw(v,moving?t/1000:0);
+ if(v<1&&art){const opacity=1-ease(clamp(v*1.5));cover.draw(ctx,{width:W,height:H,opacity,time:t/1000,still:!moving,drawCore:alpha=>{for(const p of art.particles)art.paint(p,0,art.poses[p.i][0],alpha);ctx.lineWidth=.8;ctx.globalAlpha=alpha;for(const q of art.cubeFaces()){poly(ctx,q);ctx.strokeStyle='#a9d3df88';ctx.stroke()}}});}
+ if(v>=1)cover.dirty=false;
+ if(moving)impulse*=.96;force=false;
+}
+function seeded(seed){let x=seed>>>0;return()=>{x=(x*1664525+1013904223)>>>0;return x/4294967296}}
+function canvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+function poly(c,q){c.beginPath();q.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.closePath()}
+function quad(x,y,w,h,angle=0,skew=0){const cs=Math.cos(angle),sn=Math.sin(angle);return [[-w/2,-h/2],[w/2,-h/2],[w/2+skew,h/2],[-w/2+skew,h/2]].map(([a,b])=>({x:x+a*cs-b*sn,y:y+a*sn+b*cs}))}
+function bilinear(q,u,v){return{x:(1-u)*(1-v)*q[0].x+u*(1-v)*q[1].x+u*v*q[2].x+(1-u)*v*q[3].x,y:(1-u)*(1-v)*q[0].y+u*(1-v)*q[1].y+u*v*q[2].y+(1-u)*v*q[3].y}}
+function patch(q,c,r,cols,rows){return[bilinear(q,c/cols,r/rows),bilinear(q,(c+1)/cols,r/rows),bilinear(q,(c+1)/cols,(r+1)/rows),bilinear(q,c/cols,(r+1)/rows)]}
+class World {
+ constructor(blue,water,floor,pool,portrait,botanical){this.blue=blue;this.water=water;this.floor=floor;this.pool=pool;this.portrait=portrait;this.botanical=botanical;this.particles=Array.from({length:96},(_,i)=>{const r=seeded(i*7141+321);return{i,r:r(),a:r()*Math.PI*2,j:r(),k:r(),z:r()}});this.paper=this.makePaper();this.title=canvas(1040,400);this.resize()}
+ makePaper(){let list=[];for(let k=0;k<8;k++){const c=canvas(200,250),p=c.getContext('2d'),r=seeded(100+k);p.fillStyle=k%3===0?'#c7bea7':k%3===1?'#174155':'#2a657a';p.fillRect(0,0,200,250);if(k%3){p.globalAlpha=.38;p.drawImage(this.water,0,0,200,250);p.globalAlpha=1}else{p.globalAlpha=.10;p.drawImage(this.blue,0,0,200,250);p.globalAlpha=1}
+ p.lineWidth=.65;p.strokeStyle=k%3===0?'#d5c9a8':'#c4d9d3';p.globalAlpha=.25;
+ for(let j=0;j<22;j++){p.beginPath();let x=r()*200,y=r()*250;p.moveTo(x,y);for(let t=0;t<3;t++){x+=(r()-.5)*60;y+=(r()-.5)*60;p.lineTo(x,y)}p.stroke()}p.globalAlpha=1;
+ // Small abstract studies echo the approved editorial fragments.
+ if(k===0||k===3){p.strokeStyle='#183946';p.lineWidth=1.2;p.beginPath();p.moveTo(55,90);p.lineTo(100,65);p.lineTo(146,88);p.lineTo(100,115);p.closePath();p.moveTo(55,90);p.lineTo(55,145);p.lineTo(100,175);p.lineTo(146,145);p.lineTo(146,88);p.moveTo(100,115);p.lineTo(100,175);p.stroke()}
+ if(k===2||k===5){p.strokeStyle='#172e3a';p.lineWidth=3;p.beginPath();p.moveTo(105,205);p.bezierCurveTo(90,150,115,110,101,48);p.stroke();for(let j=0;j<5;j++){const y=80+j*24;p.beginPath();p.ellipse(j%2?82:120,y,10,26,j%2?-.5:.5,0,Math.PI*2);p.fillStyle='#173e4c';p.fill()}}
+ if(k===6){p.fillStyle='#213e49';p.font='16px Origin';p.fillText('memoria',28,74);p.fillText('origen',60,145);p.strokeStyle='#c8c1a07a';p.lineWidth=.7;p.beginPath();p.moveTo(30,88);p.lineTo(155,115);p.lineTo(60,160);p.stroke()}
+ if(k===1)p.drawImage(this.portrait,0,0,200,250);if(k===5)p.drawImage(this.botanical,0,0,200,250);
+ const noise=p.createImageData(200,250);for(let n=0;n<noise.data.length;n+=4){const v=r();noise.data[n]=noise.data[n+1]=noise.data[n+2]=v>.5?230:10;noise.data[n+3]=r()*22}const nc=canvas(200,250);nc.getContext('2d').putImageData(noise,0,0);p.drawImage(nc,0,0);list.push(c)}return list}
+ resize(){world.width=W*DPR;world.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);this.titleDraw();this.background=this.makeBackground();this.poses=this.particles.map(p=>Array.from({length:10},(_,state)=>this.pose(p,state)));force=true}
+ titleDraw(){const c=this.title.getContext('2d');c.clearRect(0,0,1040,400);c.fillStyle='#e1d6bf';c.textAlign='center';c.font='164px Origin';const title=content.scenes[1].title;if(title==='VOLVER AL ORIGEN'){c.fillText('VOLVER',520,182);c.font='151px Origin';c.fillText('AL ORIGEN',520,337)}else{const words=title.split(' '),split=Math.ceil(words.length/2);c.font='130px Origin';c.fillText(words.slice(0,split).join(' '),520,175,1000);c.fillText(words.slice(split).join(' '),520,330,1000)}
+ const r=seeded(81);c.globalCompositeOperation='source-atop';for(let i=0;i<6000;i++){c.fillStyle=r()>.5?'#29333b20':'#f4ead72a';c.fillRect(r()*1040,r()*400,r()*2+1,r()*4+1)}c.globalCompositeOperation='source-over'}
+ cubeFaces(cx=W*.47,cy=H*.47){const s=mobile?Math.min(W*.35,H*.22):Math.min(W*.15,H*.26);const a={x:cx,y:cy-s*.57},b={x:cx+s*.52,y:cy-s*.43},c={x:cx,y:cy-s*.30},d={x:cx-s*.52,y:cy-s*.43},e={x:cx-s*.52,y:cy+s*.45},f={x:cx,y:cy+s*.58},g={x:cx+s*.52,y:cy+s*.45};return[[a,b,c,d],[d,c,f,e],[c,b,g,f]]}
+ cubePatch(p,cx,cy){const face=Math.floor(p.i/32),cell=p.i%32;return patch(this.cubeFaces(cx,cy)[face],cell%4,Math.floor(cell/4),4,8)}
+ pose(p,s){const i=p.i,r=p.r,a=p.a;
+ if(s===0||s===9)return this.cubePatch(p,W*.47,H*.47);
+ if(s===1||s===2||s===7){const compact=s!==1;const tw=mobile?W*.99:W*(compact?.49:.69),th=tw*400/1040;const cx=mobile?W*.5:W*(compact?.30:.50),cy=mobile?H*.29:H*(compact?.42:.43);
+ if(i<64){const cols=8,rows=8;return quad(cx-tw/2+(i%cols+.5)*tw/cols,cy-th/2+(Math.floor(i/cols)+.5)*th/rows,tw/cols+.25,th/rows+.25)}
+ const j=i-64,theta=j*2.399;const rr=(.47+r*.13);let x=cx+Math.cos(theta)*tw*rr,y=cy+Math.sin(theta)*th*(.75+p.j*.55);const w=(20+r*62)*(mobile?.55:1),h=w*(.6+p.k);return quad(x,y,w,h,(r-.5)*1.8,p.k*8)}
+ if(s===3){const t=(i%28)/27,layer=Math.floor(i/28);let x=W*(.045+t*.43),y=H*(.82-t*.67)+(layer-1)*H*.06;const major=i%4===0;let sz=(major?45+p.k*80:4+p.k*15)*(mobile?.52:1);x+=Math.sin(a)*W*(major?.02:.075);y+=Math.cos(a)*H*(major?.02:.055);if(mobile){x=W*(.04+t*.89);y=H*(.42-t*.25)+(layer-1)*H*.02}return quad(x,y,sz,sz*(1+p.j*.4),-.25+Math.sin(t*5)*.32,(p.z-.5)*sz*.2)}
+ if(s===4){let x=(i%2?W*.12:W*.88)+(p.j-.5)*W*.16,y=H*(.22+p.k*.53);if(i<12){x=W*(.05+(i%4)*.30);y=H*(i<4?.17:.78)}let sz=(15+r*49)*(mobile?.65:1)*(i%4===0?1:.26);return quad(x,y,sz*1.3,sz*.52,(r-.5)*.8)}
+ if(s===5){const columns=8,rows=9;const pool=mobile?quad(W*.5,H*.27,W*.78,H*.28,-.09,W*.05):quad(W*.265,H*.43,W*.34,H*.43,-.10,W*.035);if(i<72)return patch(pool,i%columns,Math.floor(i/columns),columns,rows);let j=i-72;const sz=(j%3===0?32+r*26:6+r*10)*(mobile?.5:1);let x=mobile?W*(j%2?.86:.10):W*(j%2?.45:.065),y=mobile?H*(.15+Math.floor(j/3)*.035):H*(.23+Math.floor(j/3)*.05);return quad(x,y,sz,sz*(1.2+p.j),(.2-r)*.45)}
+ if(s===6){if(i<72){const cell=i%24;return patch(this.cubeFaces(W*(mobile?.5:.27),H*(mobile?.27:.47))[Math.floor(i/24)],cell%3,Math.floor(cell/3),3,8)}let theta=i*2.39,sz=(12+r*43)*(mobile?.5:1),cx=W*(mobile?.5:.27),cy=H*(mobile?.26:.47);return quad(cx+Math.cos(theta)*W*(mobile?.32:.17),cy+Math.sin(theta)*H*(mobile?.13:.27),sz,sz*(1+p.k),r-.5)}
+ if(s===8){const q=this.cubePatch(p,W*.47,H*.47);if(i%5===0){const dx=Math.cos(a)*W*.085,dy=Math.sin(a)*H*.11;return q.map(pt=>({x:pt.x+dx,y:pt.y+dy}))}return q}
+ }
+ makeBackground(){const bg=canvas(W*DPR,H*DPR),c=bg.getContext('2d');c.scale(DPR,DPR);c.fillStyle='#060b0f';c.fillRect(0,0,W,H);let grad=c.createRadialGradient(W*.47,H*.48,0,W*.47,H*.48,H*.63);grad.addColorStop(0,'#0d263344');grad.addColorStop(.46,'#07151c22');grad.addColorStop(1,'#03080a');c.fillStyle=grad;c.fillRect(0,0,W,H);
+ const horizon=H*.735,r=seeded(1356);c.fillStyle='#08151c';c.fillRect(0,horizon,W,H-horizon);
+ c.save();c.globalAlpha=.63;c.drawImage(this.floor,0,horizon,W,H-horizon);c.restore();
+ // A shared, perspective-drawn ceramic floor with irregular wet reflections.
+ const van=W*.47;let ys=[horizon];for(let n=1;n<33;n++)ys.push(horizon+(H-horizon)*Math.pow(n/32,2.55));
+ for(let row=0;row<32;row++){let y0=ys[row],y1=ys[row+1];let cell=(y1-horizon)*.68+20;
+ for(let x=-W;x<W*2;x+=cell){const skew=(x-van)*((y1-y0)/Math.max(12,y1-horizon));c.fillStyle=`rgba(${6+Math.floor(r()*7)},${18+Math.floor(r()*14)},${25+Math.floor(r()*17)},${.08+r()*.15})`;poly(c,[{x:x-skew,y:y0},{x:x+cell-skew,y:y0},{x:x+cell,y:y1},{x,y:y1}]);c.fill();c.strokeStyle=`rgba(83,137,156,${.03+r()*.08})`;c.lineWidth=.55;c.stroke()}}
+ c.save();c.beginPath();c.rect(0,horizon,W,H-horizon);c.clip();for(let n=0;n<450;n++){const z=r(),y=horizon+(H-horizon)*z*z,x=r()*W,len=(2+r()*70)*(y-horizon)/(H-horizon)+1;const center=Math.exp(-Math.pow((x-van)/(W*(.02+z*.08)),2));c.strokeStyle=`rgba(${100+center*100},${150+center*55},${170+center*40},${(.012+r()*.035+center*.22)*(1-z*.7)})`;c.lineWidth=.5+r()*1.4;c.beginPath();c.moveTo(x,y);c.lineTo(x+len,y+Math.sin(n)*1.8);c.stroke()}
+ for(let band=0;band<22;band++){const t=band/22,y=horizon+(H-horizon)*t*t,h=(2+t*9);c.globalAlpha=.015+Math.exp(-((t-.3)**2)/.2)*.035;c.drawImage(this.water,0,(band*7)%80,this.water.width,15,van-W*.25*(.1+t),y,W*.5*(.1+t),h)}c.restore();c.globalAlpha=1;
+ let glow=c.createRadialGradient(van,horizon,0,van,horizon,W*.35);glow.addColorStop(0,'#71c5dc22');glow.addColorStop(.15,'#2779950a');glow.addColorStop(1,'#0000');c.fillStyle=glow;c.fillRect(0,horizon-40,W,H-horizon+40);
+ // Fine, fixed grain and dust; the initial and final atmosphere are identical.
+ const nc=canvas(Math.ceil(W/2),Math.ceil(H/2)),nctx=nc.getContext('2d'),data=nctx.createImageData(nc.width,nc.height);for(let j=0;j<data.data.length;j+=4){const v=r()*255;data.data[j]=data.data[j+1]=data.data[j+2]=v;data.data[j+3]=r()*13}nctx.putImageData(data,0,0);c.drawImage(nc,0,0,W,H);
+ for(let j=0;j<210;j++){let x=W*(.2+r()*.58),y=H*(.15+r()*.57);c.fillStyle=`rgba(130,186,205,${r()*.19})`;c.fillRect(x,y,r()*1.1+.2,r()*1.1+.2)}
+ const v=c.createRadialGradient(W*.5,H*.48,H*.20,W*.5,H*.48,H*.88);v.addColorStop(0,'#0000');v.addColorStop(1,'#0009');c.fillStyle=v;c.fillRect(0,0,W,H);return bg}
+ texture(image,q,sx=0,sy=0,sw=image.width,sh=image.height,alpha=1){if(alpha<=.001)return;ctx.save();poly(ctx,q);ctx.clip();const a=q[0],b=q[1],d=q[3];ctx.transform((b.x-a.x)/sw,(b.y-a.y)/sw,(d.x-a.x)/sh,(d.y-a.y)/sh,a.x,a.y);ctx.globalAlpha=alpha;ctx.drawImage(image,sx,sy,sw,sh,0,0,sw,sh);ctx.restore()}
+ paint(p,state,q,alpha){if(alpha<=.001)return;const i=p.i;ctx.save();ctx.globalAlpha=alpha;
+ if(state===0||state===9||state===8||(state===6&&i<72)){
+ const cols=state===6?3:4,cells=state===6?24:32,face=Math.floor(i/cells),cell=i%cells;this.texture(this.blue,q,(cell%cols)*this.blue.width/cols,Math.floor(cell/cols)*this.blue.height/8,this.blue.width/cols,this.blue.height/8,alpha);poly(ctx,q);ctx.fillStyle=face===1?'rgba(0,19,40,.49)':face===2?'rgba(50,161,194,.16)':'rgba(153,211,215,.15)';ctx.fill();ctx.lineWidth=.4;ctx.strokeStyle='#6ab9d008';ctx.stroke();
+ }else if((state===1||state===2||state===7)&&i<64){this.texture(this.title,q,(i%8)*130,Math.floor(i/8)*50,130,50,alpha)}
+ else if(state===4){poly(ctx,q);ctx.fillStyle=selected.has(content.paper.words[Math.floor(i/4)%content.paper.words.length])?'#86bbc6':i%4===0?'#b8b19c':'#3b788f';ctx.fill();const a=q[0],b=q[1],d=q[3];ctx.transform((b.x-a.x)/160,(b.y-a.y)/160,(d.x-a.x)/70,(d.y-a.y)/70,a.x,a.y);ctx.fillStyle='#102b38';ctx.font='24px Origin';ctx.textAlign='center';if(i%4===0)ctx.fillText(content.paper.words[Math.floor(i/4)%content.paper.words.length],80,44,143)}
+ else if(state===5&&i<72){this.texture(this.pool,q,(i%8)*this.pool.width/8,Math.floor(i/8)*this.pool.height/9,this.pool.width/8,this.pool.height/9,alpha);poly(ctx,q);ctx.fillStyle='#06466444';ctx.fill();ctx.strokeStyle='#14394777';ctx.lineWidth=1;ctx.stroke()}
+ else {this.texture(this.paper[i%8],q,0,0,200,250,alpha);if(i%4===0){poly(ctx,q);ctx.strokeStyle='#b7c8b86b';ctx.lineWidth=.6;ctx.stroke()}}
+ ctx.restore()}
+ draw(v,time){ctx.setTransform(DPR,0,0,DPR,0,0);ctx.globalAlpha=1;ctx.drawImage(this.background,0,0,W,H);let from=Math.floor(v),to=Math.min(9,from+1),t=v-from;
+ // The same geometry, textures, floor, camera and light are reused at both endpoints.
+ const endpoint=v<.001||v>8.999;const cx=mix(from===6?W*(mobile?.5:.27):W*.47,to===6?W*(mobile?.5:.27):W*.47,t),cy=mix(from===6?H*(mobile?.27:.47):H*.47,to===6?H*(mobile?.27:.47):H*.47,t);
+ let cubeLight=endpoint?1:(from===0?1-t:to===9?t:from===6?(.45*(1-t)):to===6?t*.45:from===8?.5*(1-t):0);
+ if(cubeLight>0){let g=ctx.createRadialGradient(cx,cy,10,cx,cy,Math.min(W*.3,H*.44));g.addColorStop(0,`rgba(44,146,186,${.12*cubeLight})`);g.addColorStop(.5,`rgba(16,100,139,${.035*cubeLight})`);g.addColorStop(1,'#0000');ctx.fillStyle=g;ctx.fillRect(0,0,W,H)}
+ if(!mobile||endpoint){ctx.save();ctx.strokeStyle=`rgba(196,197,163,${endpoint?.13:.10})`;ctx.lineWidth=.6;ctx.beginPath();ctx.ellipse(endpoint?W*.47:W*.33,endpoint?H*.59:H*.47,W*(endpoint?.13:.27),H*(endpoint?.037:.11),endpoint?-.04:-.20,0,Math.PI*1.77);ctx.stroke();ctx.restore()}
+ let ordered=this.particles;for(const p of ordered){const qa=this.poses[p.i][from],qb=this.poses[p.i][to];let q=qa.map((a,i)=>({x:mix(a.x,qb[i].x,t),y:mix(a.y,qb[i].y,t)}));
+ if(!endpoint&&!(motionOff())&&!(p.i<64&&((v>=.995&&v<=1.02)||(v>=6.995&&v<=7.02)))){const center=q.reduce((a,b)=>({x:a.x+b.x/4,y:a.y+b.y/4}),{x:0,y:0});let dx=0,dy=0;if(v>1&&v<3.3){const d=Math.hypot(center.x-pointer.x,center.y-pointer.y);let rep=clamp(1-d/175)*13;dx=(center.x-pointer.x)/Math.max(1,d)*rep;dy=(center.y-pointer.y)/Math.max(1,d)*rep;dx+=Math.cos(p.a)*impulse*45;dy+=Math.sin(p.a)*impulse*45}const drift=(p.i<64&&(v<2.5||v>6.5&&v<7.5))?.1:1;const phase=p.i<72&&((v>4.75&&v<5.4)||(v>5.7&&v<6.3))?0:p.a;dx+=Math.sin(time*.28+phase)*2*drift;dy+=Math.cos(time*.24+phase)*2*drift;q=q.map(pt=>({x:pt.x+dx,y:pt.y+dy}))}
+ if(v>3.5&&v<4.5&&selected.size){const wi=[...selected].indexOf(content.paper.words[Math.floor(p.i/4)%content.paper.words.length]);if(wi>=0){const weight=clamp(1-Math.abs(v-4)*2),center=q.reduce((a,b)=>({x:a.x+b.x/4,y:a.y+b.y/4}),{x:0,y:0});const dx=((p.i%2?W*.13:W*.88)-center.x)*weight*.40,dy=(H*(.35+wi*.16)-center.y)*weight*.55;q=q.map(pt=>({x:pt.x+dx,y:pt.y+dy}))}}
+ if(dispersed&&v>1&&v<3.3){const d=mobile?8:16;q=q.map(pt=>({x:pt.x+Math.cos(p.a)*d,y:pt.y+Math.sin(p.a)*d}))}
+ this.paint(p,from,q,1-t);if(t>.001)this.paint(p,to,q,t);
+ }
+ // Delicate outlines bind the solid cube without changing its lighting at the return.
+ if(endpoint){ctx.lineWidth=.8;for(const q of this.cubeFaces()){poly(ctx,q);ctx.strokeStyle='#a9d3df88';ctx.stroke()}ctx.save();const cy=H*.735;let g=ctx.createRadialGradient(W*.47,cy,0,W*.47,cy,W*.10);g.addColorStop(0,'#acd8dd20');g.addColorStop(1,'#0000');ctx.fillStyle=g;ctx.fillRect(W*.34,cy-25,W*.26,75);ctx.restore()}
+ if(v>4.7&&v<6.1){let opacity=clamp((v-4.7)*4)*clamp((6.1-v)*2);ctx.save();ctx.globalAlpha=opacity*.18;ctx.strokeStyle='#b6dce0';ctx.lineWidth=.65;const x=mobile?W*.50:W*.27,y=H*(mobile?.27:.43);for(let n=0;n<5;n++){ctx.beginPath();ctx.ellipse(x,y,40+n*24,10+n*8,-.12,0,Math.PI*2);ctx.stroke()}ctx.restore()}
+ }
+}
+async function init(){
+ document.body.classList.add('loading');
+ try{const response=await fetch('content.json',{cache:'no-store'});if(!response.ok)throw Error('No se pudo cargar content.json');content=await response.json();
+ const load=src=>new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=reject;im.src=src});
+ const [blue,water,floor,pool,portrait,botanical]=await Promise.all([load('assets/blue-ceramic.jpg'),load('assets/water-material.jpg'),load('assets/floor-material.jpg'),load('assets/pool-approved.jpg'),load('assets/portrait-approved.jpg'),load('assets/botanical-approved.jpg'),document.fonts.load('20px Origin')]);
+ render();art=new World(blue,water,floor,pool,portrait,botanical);document.body.classList.remove('loading');measure();scroll=scrollY;tick(0);
+ document.fonts.ready.then(()=>{measure();art.resize()});
+ if(/^#s\d\d$/.test(location.hash))requestAnimationFrame(()=>goScene(location.hash.slice(2)));
+ // Local preview is an explicit channel, restricted to a loopback server and its parent editor.
+ if(['localhost','127.0.0.1','[::1]','terminal.local'].includes(location.hostname)&&window.parent!==window){addEventListener('message',e=>{if(e.origin!==location.origin||e.source!==parent)return;if(e.data?.type==='origin-content'&&e.data.content?.schemaVersion===1&&e.data.content.scenes?.length===10){content=e.data.content;const y=scrollY;render();scrollTo(0,y);parent.postMessage({type:'origin-preview-applied'},location.origin)}if(e.data?.type==='origin-scene'){const el=$('#s'+e.data.scene);if(el)goScene(e.data.scene)}});parent.postMessage({type:'origin-preview-ready'},location.origin)}
+ }catch(error){document.body.classList.remove('loading');$('#journey').innerHTML=`<div class="no-script"><p>No se pudo iniciar la experiencia.</p><p>${escape(error.message||'Recarga la página.')}</p><a href="ensayo.html">Leer el ensayo íntegro</a></div>`;console.error(error)}
+}
+init();
+})();

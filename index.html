@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#060d12"><meta name="description" content="Una experiencia narrativa sobre creatividad, identidad y el significado de crear. Ensayo de OPR, Diseño UC.">
+<title>VOLVER AL ORIGEN</title>
+<link rel="preload" href="assets/origin-roman.otf" as="font" type="font/otf" crossorigin>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#reading-start">Ir al contenido</a>
+<canvas id="world" aria-hidden="true"></canvas><div class="grain" aria-hidden="true"></div>
+<header class="topbar"><a class="wordmark" href="#s01" aria-label="Volver al origen, inicio"><span class="mark" aria-hidden="true">◇</span><span>VOLVER AL ORIGEN</span></a><nav aria-label="Lectura"><button data-action="essay">Leer el ensayo</button><button data-action="sources">Fuentes y créditos</button></nav></header>
+<main id="journey" aria-label="Volver al origen, ensayo interactivo"><h1 class="sr-only">VOLVER AL ORIGEN</h1><div id="reading-start"></div></main>
+<aside class="journey-index" aria-label="Recorrido"><button class="index-trigger" aria-expanded="false" aria-controls="scene-menu"><span id="scene-number">01</span><span class="index-line" aria-hidden="true"></span><span id="scene-label">Origen</span><span class="index-expand" aria-hidden="true">＋</span></button><nav id="scene-menu" aria-label="Momentos del ensayo" hidden></nav></aside>
+<div class="bottom-controls"><button id="motion-toggle" aria-pressed="false" aria-label="Pausar movimiento"><span aria-hidden="true">Ⅱ</span></button><span id="course">OPR · Diseño UC</span></div>
+<div class="scroll-progress" aria-hidden="true"><i></i></div>
+<dialog id="reader" aria-labelledby="reader-title"><div class="reader-top"><span id="reader-title">Lectura íntegra</span><button class="dialog-close" aria-label="Cerrar">Cerrar <span aria-hidden="true">×</span></button></div><article id="reader-content"></article></dialog>
+<noscript><div class="no-script">Esta experiencia necesita JavaScript. <a href="ensayo.html">Puedes leer el ensayo íntegro aquí.</a></div></noscript>
+<script src="cover.js" defer></script><script src="app.js" defer></script>
+</body></html>
