@@ -1,0 +1,48 @@
+name: Publicar Volver al origen
+
+on:
+  push:
+    paths:
+      - "volver-al-origen-publicar.zip"
+      - ".github/workflows/publicar.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Preparar archivos de la web
+        run: |
+          set -euo pipefail
+          test -f volver-al-origen-publicar.zip || { echo "Falta volver-al-origen-publicar.zip en la raíz del repositorio"; exit 1; }
+          mkdir -p site
+          unzip -q volver-al-origen-publicar.zip -d site
+          test -f site/index.html || { echo "El ZIP no contiene index.html en la raíz"; exit 1; }
+          touch site/.nojekyll
+
+      - name: Subir archivos de GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publicar sitio
+        id: deploy
+        uses: actions/deploy-pages@v4
